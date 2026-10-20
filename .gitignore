@@ -40,3 +40,6 @@ _/*
 /third_party/paddleocr/runtime/
 /third_party/paddleocr/models/*.onnx
 __pycache__/
+
+# libzip iOS reconstruite par scripts/build_libzip_ios.sh
+/third_party/libzip-ios/

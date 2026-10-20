@@ -3041,7 +3041,7 @@ static void plist_d(std::streambuf &buffer, size_t length, const Functor<void (p
 
 static std::string plist_s(plist_t node) {
     if (node == NULL)
-        return NULL;
+        return std::string();
     if (plist_get_node_type(node) != PLIST_STRING) {
         fprintf(stderr, "ldid: Unexpected plist type. Expected <string>\n");
         exit(1);

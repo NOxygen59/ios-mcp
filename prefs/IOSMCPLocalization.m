@@ -9,7 +9,7 @@ NSString *IOSMCPLocalizedString(NSString *key) {
     NSBundle *bundle = [NSBundle bundleForClass:IOSMCPLocalizationAnchor.class];
     // Respect preferred languages (not the region), independently of the host
     // app's resource bundle. No saved language override or cached language choice.
-    NSString *language = [NSBundle preferredLocalizationsFromArray:@[@"en", @"zh-Hans", @"zh-Hant"]
+    NSString *language = [NSBundle preferredLocalizationsFromArray:@[@"en", @"fr", @"zh-Hans", @"zh-Hant"]
                                                   forPreferences:NSLocale.preferredLanguages].firstObject ?: @"en";
     NSString *englishPath = [bundle pathForResource:@"en" ofType:@"lproj"];
     NSBundle *english = englishPath ? [NSBundle bundleWithPath:englishPath] : nil;

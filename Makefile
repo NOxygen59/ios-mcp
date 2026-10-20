@@ -38,10 +38,12 @@ include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/bundle.mk
 
 after-stage::
+ifneq ($(IOS_MCP_NO_PADDLE),1)
 	@# Paddle runs in a separate process: SpringBoard does not link ONNX/OpenCV.
 	$(ECHO_NOTHING)mkdir -p "$(THEOS_STAGING_DIR)/usr/libexec/ios-mcp" "$(THEOS_STAGING_DIR)/usr/share/ios-mcp/paddleocr"$(ECHO_END)
 	$(ECHO_NOTHING)cp mcp-ocr-worker/.theos/obj/mcp-ocr-worker "$(THEOS_STAGING_DIR)/usr/libexec/ios-mcp/"$(ECHO_END)
 	$(ECHO_NOTHING)cp third_party/paddleocr/models/* "$(THEOS_STAGING_DIR)/usr/share/ios-mcp/paddleocr/"$(ECHO_END)
+endif
 	$(ECHO_NOTHING)mkdir -p "$(THEOS_STAGING_DIR)/Library/PreferenceLoader/Preferences"$(ECHO_END)
 	$(ECHO_NOTHING)cp prefs/entry/ios-mcp.plist "$(THEOS_STAGING_DIR)/Library/PreferenceLoader/Preferences/ios-mcp.plist"$(ECHO_END)
 	@# Bundle license and third-party notices for binary redistribution
@@ -49,8 +51,10 @@ after-stage::
 	$(ECHO_NOTHING)cp LICENSE "$(THEOS_STAGING_DIR)/usr/share/doc/ios-mcp/LICENSE"$(ECHO_END)
 	$(ECHO_NOTHING)cp NOTICE "$(THEOS_STAGING_DIR)/usr/share/doc/ios-mcp/NOTICE"$(ECHO_END)
 	$(ECHO_NOTHING)cp THIRD_PARTY_NOTICES.md "$(THEOS_STAGING_DIR)/usr/share/doc/ios-mcp/THIRD_PARTY_NOTICES.md"$(ECHO_END)
+ifneq ($(IOS_MCP_NO_PADDLE),1)
 	$(ECHO_NOTHING)mkdir -p "$(THEOS_STAGING_DIR)/usr/share/doc/ios-mcp/paddleocr"$(ECHO_END)
 	$(ECHO_NOTHING)cp third_party/paddleocr/LICENSE* third_party/paddleocr/ONNXRuntime-ThirdPartyNotices.txt third_party/paddleocr/dependencies.lock.json "$(THEOS_STAGING_DIR)/usr/share/doc/ios-mcp/paddleocr/"$(ECHO_END)
+endif
 	$(ECHO_NOTHING)cp AppSync/LICENSE "$(THEOS_STAGING_DIR)/usr/share/doc/ios-mcp/GPL-3.0-AppSync.txt"$(ECHO_END)
 	$(ECHO_NOTHING)cp third_party/ldid/COPYING "$(THEOS_STAGING_DIR)/usr/share/doc/ios-mcp/AGPL-3.0-ldid.txt"$(ECHO_END)
 	@# Bundle mcp-appsync (bypass installd signature checks)

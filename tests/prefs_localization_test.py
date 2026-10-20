@@ -16,7 +16,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 RESOURCES = ROOT / "prefs/Resources"
-LANGUAGES = ("en", "zh-Hans", "zh-Hant")
+LANGUAGES = ("en", "fr", "zh-Hans", "zh-Hant")
 HAN = re.compile(r"[\u3400-\u9fff]")
 OBJC_STRINGS = re.compile(r'@"(?:\\.|[^"\\])*"(?:\s*@"(?:\\.|[^"\\])*")*')
 FORMATS = re.compile(r"%(?:\d+\$)?[-+ #0]*(?:\d+|\*)?(?:\.(?:\d+|\*))?(?:hh|ll|[hljztL])?[@diuoxXfFeEgGaAcCsSpn%]")
@@ -76,7 +76,7 @@ class PreferencesLocalizationTests(unittest.TestCase):
                                  [f"{i}." for i in range(1, 13)])
         self.assertFalse(any(HAN.search(value) for value in self.tables["en"].values()))
         for key, value in self.tables["zh-Hans"].items():
-            if key != "MCP_PROMPT":
+            if key not in ("MCP_PROMPT", "AUTH_PROMPT_NOTE"):
                 self.assertEqual(key, value, "Preserve the original Simplified Chinese UI")
         info = plistlib.loads((RESOURCES / "Info.plist").read_bytes())
         self.assertEqual(info["CFBundleDevelopmentRegion"], "en")
@@ -102,12 +102,13 @@ class PreferencesLocalizationTests(unittest.TestCase):
 
     def test_preferred_language_resolution(self):
         cases = [(lang, expected) for expected, variants in (
-            ("en", ("en-US", "en-GB", "fr-FR", "ja-JP")),
+            ("en", ("en-US", "en-GB", "ja-JP")),
+            ("fr", ("fr", "fr-FR", "fr-CA", "fr-BE")),
             ("zh-Hans", ("zh-Hans", "zh-Hans-CN", "zh-CN", "zh-SG")),
             ("zh-Hant", ("zh-Hant", "zh-Hant-TW", "zh-TW", "zh-HK")),
         ) for lang in variants]
         cases = [([lang], expected) for lang, expected in cases]
-        cases += [(["en-US", "zh-Hans"], "en"), (["fr-FR", "zh-CN", "en-US"], "zh-Hans")]
+        cases += [(["en-US", "zh-Hans"], "en"), (["fr-FR", "zh-CN", "en-US"], "fr"), (["ja-JP", "zh-CN", "en-US"], "zh-Hans")]
         for preferences, expected in cases:
             with self.subTest(preferences=preferences):
                 resolved = self.resolve(preferences)

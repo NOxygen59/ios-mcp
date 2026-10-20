@@ -2,10 +2,20 @@
 #import "VisionOCREngine.h"
 #import "PaddleOCRManager.h"
 #import "MCPLogger.h"
+#import "MCPProcessUtil.h"
 #include <math.h>
 
 @implementation OCRManager
-+ (NSString *)defaultEngine { return @"paddleocr"; }
++ (NSString *)defaultEngine {
+    // Builds made without the PaddleOCR worker (IOS_MCP_NO_PADDLE=1) default to Apple Vision.
+    static NSString *engine;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSString *worker = MCPResolvedJailbreakPath(@"/usr/libexec/ios-mcp/mcp-ocr-worker");
+        engine = [[NSFileManager defaultManager] isExecutableFileAtPath:worker] ? @"paddleocr" : @"vision";
+    });
+    return engine;
+}
 + (instancetype)sharedInstance {
     static OCRManager *instance;
     static dispatch_once_t once;

@@ -10,6 +10,8 @@
 #define IOS_MCP_ENABLED_PREFERENCE_KEY @"enabled"
 #define IOS_MCP_PORT_PREFERENCE_KEY @"port"
 #define IOS_MCP_DEBUG_LOGGING_PREFERENCE_KEY @"debugLoggingEnabled"
+#define IOS_MCP_AUTH_ENABLED_PREFERENCE_KEY @"authEnabled"
+#define IOS_MCP_AUTH_TOKEN_PREFERENCE_KEY @"authToken"
 #define IOS_MCP_DARWIN_NOTIFICATION_START CFSTR("com.witchan.ios-mcp.control/start")
 #define IOS_MCP_DARWIN_NOTIFICATION_STOP CFSTR("com.witchan.ios-mcp.control/stop")
 
@@ -48,6 +50,46 @@ static inline uint16_t IOSMCPConfiguredPort(void) {
         CFRelease(value);
     }
     return port;
+}
+
+/// Stored token, whether or not authentication is enabled.
+static inline NSString *IOSMCPStoredAuthToken(void) {
+    CFPreferencesAppSynchronize((__bridge CFStringRef)IOS_MCP_PREFERENCES_DOMAIN);
+    CFPropertyListRef value = CFPreferencesCopyAppValue((__bridge CFStringRef)IOS_MCP_AUTH_TOKEN_PREFERENCE_KEY,
+                                                        (__bridge CFStringRef)IOS_MCP_PREFERENCES_DOMAIN);
+    NSString *token = nil;
+    if (value) {
+        id object = (__bridge id)value;
+        if ([object isKindOfClass:[NSString class]] && [(NSString *)object length] > 0) {
+            token = [(NSString *)object copy];
+        }
+        CFRelease(value);
+    }
+    return token;
+}
+
+/// Token that clients must send, or nil when authentication is disabled.
+static inline NSString *IOSMCPRequiredAuthToken(void) {
+    CFPreferencesAppSynchronize((__bridge CFStringRef)IOS_MCP_PREFERENCES_DOMAIN);
+    Boolean valid = false;
+    Boolean enabled = CFPreferencesGetAppBooleanValue((__bridge CFStringRef)IOS_MCP_AUTH_ENABLED_PREFERENCE_KEY,
+                                                      (__bridge CFStringRef)IOS_MCP_PREFERENCES_DOMAIN,
+                                                      &valid);
+    if (!valid || !enabled) {
+        return nil;
+    }
+    return IOSMCPStoredAuthToken();
+}
+
+/// 32 random bytes as 64 lowercase hex characters.
+static inline NSString *IOSMCPGenerateAuthToken(void) {
+    uint8_t bytes[32];
+    arc4random_buf(bytes, sizeof(bytes));
+    NSMutableString *token = [NSMutableString stringWithCapacity:sizeof(bytes) * 2];
+    for (size_t i = 0; i < sizeof(bytes); i++) {
+        [token appendFormat:@"%02x", bytes[i]];
+    }
+    return token;
 }
 
 static inline NSString *IOSMCPCurrentLANIPAddress(void) {

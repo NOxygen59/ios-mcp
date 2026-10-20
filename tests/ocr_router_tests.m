@@ -8,6 +8,8 @@
 @implementation MCPLogger
 + (void)log:(NSString *)format, ... {}
 @end
+// Pretend the PaddleOCR worker is installed so the default engine stays paddleocr.
+NSString *MCPResolvedJailbreakPath(NSString *path) { return @"/bin/sh"; }
 @implementation VisionOCREngine
 + (instancetype)sharedInstance { return [self new]; }
 + (BOOL)validateRegion:(NSDictionary *)region error:(NSString **)error { return YES; }

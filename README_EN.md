@@ -1,6 +1,6 @@
 # iOS MCP
 
-[中文](README.md) | English
+[中文](README.md) | English | [Français](README_FR.md)
 
 iOS MCP is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that runs on jailbroken iPhones, enabling AI agents (Claude, Codex, Cursor, etc.) to directly control iOS devices.
 

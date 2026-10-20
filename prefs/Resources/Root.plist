@@ -58,6 +58,36 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>id</key>
+			<string>authGroup</string>
+			<key>label</key>
+			<string>访问令牌</string>
+			<key>footerText</key>
+			<string>开启后，除 /health 外的所有请求都必须携带 Authorization: Bearer &lt;令牌&gt; 请求头。局域网内的其他设备将无法控制本机。</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.witchan.ios-mcp.preferences</string>
+			<key>key</key>
+			<string>authEnabled</string>
+			<key>label</key>
+			<string>要求访问令牌</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>regenerateAuthToken:</string>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>重新生成访问令牌</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>id</key>
 			<string>debugLogGroup</string>
 			<key>label</key>
 			<string>Debug 日志</string>
@@ -109,6 +139,14 @@
 			<string>PSButtonCell</string>
 			<key>label</key>
 			<string>复制并分享 MCP 提示词片段</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>copyClaudeCodeCommand:</string>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>复制 Claude Code 命令</string>
 		</dict>
 		<dict>
 			<key>cell</key>

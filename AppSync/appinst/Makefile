@@ -16,7 +16,9 @@ mcp-appinst_CCFLAGS += -std=c++11 -stdlib=libc++ -fobjc-arc -include ./zip.h -I 
 mcp-appinst_CFLAGS += -fobjc-arc -include ./zip.h -I . -fvisibility=hidden -Wno-unused-property-ivar
 mcp-appinst_FRAMEWORKS = Foundation ImageIO CoreGraphics Security
 mcp-appinst_PRIVATE_FRAMEWORKS = MobileCoreServices
-mcp-appinst_LDFLAGS += $(THEOS)/lib/libzip.a
+# libzip : celle du projet (scripts/build_libzip_ios.sh) si elle existe, sinon celle de Theos.
+MCP_LIBZIP ?= $(firstword $(wildcard $(CURDIR)/../../third_party/libzip-ios/lib/libzip.a) $(THEOS)/lib/libzip.a)
+mcp-appinst_LDFLAGS += $(MCP_LIBZIP)
 mcp-appinst_LIBRARIES = z
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
     mcp-appinst_CFLAGS += -DMCP_ROOTHIDE=1

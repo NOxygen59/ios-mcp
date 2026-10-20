@@ -1,3 +1,36 @@
+> [!WARNING]
+> **Projet personnel « vibecodé ».** Tout le code de ce dépôt (ou, pour un fork, toutes les modifications) a été écrit par **Claude** (Anthropic, via Claude Code), à la demande spécifique de [@NOxygen59](https://github.com/NOxygen59), pour **son appareil précis** :
+>
+> **iPad Pro 12,9" 5ᵉ génération (puce M1) — 512 Go de stockage, 8 Go de RAM — iOS 16.6.1, jailbreak Dopamine (rootless) + TrollStore.**
+>
+> Rien n'est testé ni prévu pour un autre appareil. Pas de support, pas de feuille de route : c'est un dépôt d'archive personnel, publié pour pouvoir reprendre le travail plus tard (modifications, mises à jour).
+
+# iOS MCP iPad
+
+**Fork** de [witchan/ios-mcp](https://github.com/witchan/ios-mcp) (base : commit `62c4464`, version 1.2.8).
+
+**Licence :** MIT, celle du projet d'origine ([LICENSE](LICENSE)) ; composants tiers sous leurs propres licences ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+
+## Modifications pour iPad
+
+- **Page Réglages en français** (choisie automatiquement quand l'iPad est en français) et invite MCP traduite.
+- **Jeton d'accès** : *Réglages → iOS MCP → Exiger un jeton d'accès*. Sans le jeton, le serveur refuse toute requête sauf `/health` (`Authorization: Bearer <jeton>` ou `X-iOS-MCP-Token`). Avant, n'importe quel appareil du Wi-Fi pouvait piloter l'iPad et lancer des commandes shell.
+- **Bouton « Copier la commande Claude Code »** : `claude mcp add --transport http ios-mcp http://IP:8090/mcp --header "Authorization: Bearer …"`, prête à coller sur le Mac.
+- **OCR** : sans le moteur PaddleOCR, l'OCR passe automatiquement sur Apple Vision au lieu d'échouer.
+- **Build** : `build.sh` en français et non interactif (`./build.sh rootless release`), marche avec des espaces dans le chemin, compile `libzip` pour iOS tout seul (`scripts/build_libzip_ios.sh`), stub `roothide.h` fourni pour le Theos officiel, bug `ldid` corrigé (`std::string` construit depuis `NULL`).
+
+Guide complet en français (compilation, installation, branchement à Claude Code) : [README_FR.md](README_FR.md).
+
+## Versions
+
+| Version iPad | Version amont | Release | Contenu |
+|---|---|---|---|
+| **1.0** | 1.2.8 | [v1.2.8-ios16](https://github.com/NOxygen59/ios-mcp/releases/tag/v1.2.8-ios16) | Traduction française, jeton d'accès, commande Claude Code, OCR Vision par défaut sans PaddleOCR, build reproductible |
+
+Les `.deb` sont dans les [Releases](https://github.com/NOxygen59/ios-mcp/releases).
+
+---
+
 # iOS MCP
 
 中文 | [English](README_EN.md) 

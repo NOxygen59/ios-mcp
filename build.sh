@@ -1,8 +1,42 @@
 #!/bin/zsh
+# Construit le paquet .deb d'iOS MCP.
+#
+# Utilisation :
+#   ./build.sh                       # menu interactif
+#   ./build.sh rootless release      # sans questions
+#   ./build.sh roothide debug
+#
+# Variables utiles :
+#   THEOS=~/theos                    # emplacement de Theos (défaut : ~/theos)
+#   IOS_MCP_NO_PADDLE=1              # ignore PaddleOCR (l'OCR utilise alors Apple Vision)
 set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+export THEOS="${THEOS:-$HOME/theos}"
+
+# Theos refuse les chemins contenant des espaces : on compile dans une copie temporaire.
+if [[ "$ROOT_DIR" == *" "* && -z "${IOS_MCP_BUILD_COPY:-}" ]]; then
+  BUILD_COPY="${TMPDIR:-/tmp}"
+  BUILD_COPY="${BUILD_COPY%/}/ios-mcp-build"
+  if [[ "$BUILD_COPY" == *" "* ]]; then
+    BUILD_COPY="/tmp/ios-mcp-build"
+  fi
+  print "Le chemin du projet contient des espaces ; compilation dans ${BUILD_COPY}"
+  mkdir -p "$BUILD_COPY"
+  rsync -a --delete --exclude .git --exclude packages --exclude .theos "${ROOT_DIR}/" "${BUILD_COPY}/"
+  IOS_MCP_BUILD_COPY=1 zsh "${BUILD_COPY}/build.sh" "$@"
+  mkdir -p "${ROOT_DIR}/packages"
+  cp -f "${BUILD_COPY}"/packages/*.deb "${ROOT_DIR}/packages/" 2>/dev/null || true
+  print "Paquets copiés dans ${ROOT_DIR}/packages"
+  exit 0
+fi
+
 cd "$ROOT_DIR"
+
+# Le Theos officiel n'a pas roothide.h : on fournit le stub pour rootful/rootless.
+if [[ ! -f "$THEOS/vendor/include/roothide.h" ]]; then
+  export ADDITIONAL_CFLAGS="${ADDITIONAL_CFLAGS:-} -I${ROOT_DIR}/third_party/roothide-stub/include"
+fi
 
 OUTPUT_DIR="${ROOT_DIR}/packages"
 mkdir -p "$OUTPUT_DIR"
@@ -12,67 +46,55 @@ latest_package_after() {
   find "${ROOT_DIR}/packages" -maxdepth 1 -type f -name '*.deb' -newer "${stamp_file}" -print | sort | tail -n 1
 }
 
+set_scheme() {
+  case "$1" in
+    1|rootful|ROOTFUL)    BUILD_SCHEME="";         BUILD_SCHEME_LABEL="rootful" ;;
+    2|rootless|ROOTLESS)  BUILD_SCHEME="rootless"; BUILD_SCHEME_LABEL="rootless" ;;
+    3|roothide|ROOTHIDE)  BUILD_SCHEME="roothide"; BUILD_SCHEME_LABEL="roothide" ;;
+    *) return 1 ;;
+  esac
+}
+
+set_package_type() {
+  case "$1" in
+    1|release|final) BUILD_ARGS=(FINALPACKAGE=1 DEBUG=0 STRIP=1); BUILD_TYPE_LABEL="release" ;;
+    2|debug|test)    BUILD_ARGS=(DEBUG=1 STRIP=0);                BUILD_TYPE_LABEL="debug" ;;
+    *) return 1 ;;
+  esac
+}
+
 choose_scheme() {
   while true; do
     print ""
-    print "请选择构建方案:"
-    print "  1) rootful"
-    print "  2) rootless"
-    print "  3) roothide"
-    read 'choice?输入编号: '
-
-    case "$choice" in
-      1|rootful|ROOTFUL)
-        BUILD_SCHEME=""
-        BUILD_SCHEME_LABEL="rootful"
-        return
-        ;;
-      2|rootless|ROOTLESS)
-        BUILD_SCHEME="rootless"
-        BUILD_SCHEME_LABEL="rootless"
-        return
-        ;;
-      3|roothide|ROOTHIDE)
-        BUILD_SCHEME="roothide"
-        BUILD_SCHEME_LABEL="roothide"
-        return
-        ;;
-      *)
-        print "无效输入，请重新选择。"
-        ;;
-    esac
+    print "Choisis le type de jailbreak :"
+    print "  1) rootful   (iOS 13–18, ex. checkra1n, unc0ver, palera1n rootful)"
+    print "  2) rootless  (iOS 15–18, ex. Dopamine, palera1n rootless)"
+    print "  3) roothide  (iOS 15–18, Dopamine roothide)"
+    read 'choice?Numéro : '
+    set_scheme "$choice" && return
+    print "Choix invalide, recommence."
   done
 }
 
 choose_package_type() {
   while true; do
     print ""
-    print "请选择包类型:"
-    print "  1) 正式包"
-    print "  2) 测试包"
-    read 'choice?输入编号: '
-
-    case "$choice" in
-      1|release|final)
-        BUILD_ARGS=(FINALPACKAGE=1 DEBUG=0 STRIP=1)
-        BUILD_TYPE_LABEL="release"
-        return
-        ;;
-      2|debug|test)
-        BUILD_ARGS=(DEBUG=1 STRIP=0)
-        BUILD_TYPE_LABEL="debug"
-        return
-        ;;
-      *)
-        print "无效输入，请重新选择。"
-        ;;
-    esac
+    print "Choisis le type de paquet :"
+    print "  1) release (optimisé)"
+    print "  2) debug   (symboles, pour tester)"
+    read 'choice?Numéro : '
+    set_package_type "$choice" && return
+    print "Choix invalide, recommence."
   done
 }
 
 build_subprojects() {
   print ""
-  print "==> 编译子项目..."
+  print "==> Compilation des sous-projets..."
+  if [[ ! -f third_party/libzip-ios/lib/libzip.a && ! -f "$THEOS/lib/libzip.a" ]]; then
+    print "==> libzip pour iOS absente : compilation (scripts/build_libzip_ios.sh)..."
+    zsh scripts/build_libzip_ios.sh
+  fi
   local scheme_env=()
   if [[ -n "$BUILD_SCHEME" ]]; then
     scheme_env=(THEOS_PACKAGE_SCHEME="$BUILD_SCHEME")
@@ -83,9 +105,15 @@ build_subprojects() {
   (cd mcp-ldid && make "${scheme_env[@]}" clean && make "${scheme_env[@]}")
   (cd mcp-root && make "${scheme_env[@]}" clean && make "${scheme_env[@]}")
   (cd mcp-logreader && make "${scheme_env[@]}" clean && make "${scheme_env[@]}")
+  if [[ "${IOS_MCP_NO_PADDLE:-}" == "1" ]]; then
+    print "==> PaddleOCR ignoré (IOS_MCP_NO_PADDLE=1) : l'OCR utilisera Apple Vision."
+    return
+  fi
   if [[ ! -f third_party/paddleocr/runtime/ios/lib/libonnxruntime.a ]]; then
-    print -u2 "PaddleOCR runtime missing: see docs/PADDLEOCR.md and run scripts/build_paddle_runtime.sh ios"
-    exit 1
+    print "==> Runtime PaddleOCR absent : paquet construit sans PaddleOCR (l'OCR utilisera Apple Vision)."
+    print "    Pour l'inclure, voir docs/PADDLEOCR.md."
+    export IOS_MCP_NO_PADDLE=1
+    return
   fi
   (cd mcp-ocr-worker && make "${scheme_env[@]}" clean && make "${scheme_env[@]}")
 }
@@ -96,7 +124,11 @@ build_selected_package() {
   touch "$stamp_file"
 
   print ""
-  print "==> 开始构建: ${BUILD_SCHEME_LABEL} / ${BUILD_TYPE_LABEL}"
+  if [[ "$BUILD_SCHEME_LABEL" == "roothide" && ! -f "$THEOS/vendor/include/roothide.h" ]]; then
+    print -u2 "Le build roothide nécessite le Theos de roothide (https://github.com/roothide/theos)."
+    exit 1
+  fi
+  print "==> Construction : ${BUILD_SCHEME_LABEL} / ${BUILD_TYPE_LABEL}"
   make clean >/dev/null
   build_subprojects
   if [[ "$BUILD_TYPE_LABEL" == "debug" ]]; then
@@ -112,15 +144,23 @@ build_selected_package() {
   rm -f "$stamp_file"
 
   if [[ -z "$deb" ]]; then
-    print -u2 "未在 ${ROOT_DIR}/packages 中找到本次构建产物。"
+    print -u2 "Aucun paquet produit trouvé dans ${ROOT_DIR}/packages."
     exit 1
   fi
 
   print ""
-  print "构建完成:"
+  print "Construction terminée :"
   print "  ${deb}"
 }
 
-choose_scheme
-choose_package_type
+if [[ $# -ge 1 ]]; then
+  set_scheme "$1" || { print -u2 "Type de jailbreak inconnu : $1 (rootful|rootless|roothide)"; exit 1; }
+else
+  choose_scheme
+fi
+if [[ $# -ge 2 ]]; then
+  set_package_type "$2" || { print -u2 "Type de paquet inconnu : $2 (release|debug)"; exit 1; }
+else
+  choose_package_type
+fi
 build_selected_package

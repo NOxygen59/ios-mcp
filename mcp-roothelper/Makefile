@@ -16,7 +16,9 @@ mcp-roothelper_FILES = main.m
 mcp-roothelper_CFLAGS += -fobjc-arc -include ../AppSync/appinst/zip.h -I../AppSync/appinst -fvisibility=hidden
 mcp-roothelper_CCFLAGS += -fobjc-arc -std=c++11 -stdlib=libc++ -include ../AppSync/appinst/zip.h -I../AppSync/appinst -fvisibility=hidden
 mcp-roothelper_FRAMEWORKS = Foundation
-mcp-roothelper_LDFLAGS += $(THEOS)/lib/libzip.a
+# libzip : celle du projet (scripts/build_libzip_ios.sh) si elle existe, sinon celle de Theos.
+MCP_LIBZIP ?= $(firstword $(wildcard $(CURDIR)/../third_party/libzip-ios/lib/libzip.a) $(THEOS)/lib/libzip.a)
+mcp-roothelper_LDFLAGS += $(MCP_LIBZIP)
 mcp-roothelper_LIBRARIES = z
 mcp-roothelper_USE_MODULES = 0
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)

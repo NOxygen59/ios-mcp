@@ -11,6 +11,7 @@
 #import "OCRManager.h"
 #import "MCPOCRRequestContext.h"
 #import "MCPLogger.h"
+#import "IOSMCPPreferences.h"
 #import <UIKit/UIKit.h>
 #import <sys/socket.h>
 #import <netinet/in.h>
@@ -286,6 +287,30 @@ static NSString *MCPBasePath(NSString *path) {
     NSRange query = [path rangeOfString:@"?"];
     if (query.location == NSNotFound) return path;
     return [path substringToIndex:query.location];
+}
+
+static BOOL MCPConstantTimeEquals(NSString *a, NSString *b) {
+    NSData *left = [a dataUsingEncoding:NSUTF8StringEncoding];
+    NSData *right = [b dataUsingEncoding:NSUTF8StringEncoding];
+    if (!left || !right || left.length != right.length) return NO;
+    const uint8_t *l = left.bytes, *r = right.bytes;
+    uint8_t diff = 0;
+    for (NSUInteger i = 0; i < left.length; i++) diff |= l[i] ^ r[i];
+    return diff == 0;
+}
+
+/// Accepts "Authorization: Bearer <token>" or "X-iOS-MCP-Token: <token>" (header names are lowercased).
+static BOOL MCPRequestIsAuthorized(NSDictionary<NSString *, NSString *> *headers) {
+    NSString *expected = IOSMCPRequiredAuthToken();
+    if (expected.length == 0) return YES;
+
+    NSString *provided = nil;
+    NSString *authorization = headers[@"authorization"];
+    if (authorization.length > 7 && [[authorization substringToIndex:7] caseInsensitiveCompare:@"Bearer "] == NSOrderedSame) {
+        provided = [[authorization substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+    if (provided.length == 0) provided = headers[@"x-ios-mcp-token"];
+    return provided.length > 0 && MCPConstantTimeEquals(provided, expected);
 }
 
 static NSString *MCPLogSafeFileName(NSString *fileName) {
@@ -1328,6 +1353,17 @@ static const void *MCPServerLifecycleQueueKey = &MCPServerLifecycleQueueKey;
         [self setNegotiatedProtocolVersion:protocolVersionHeader];
     }
 
+    // Optional shared-token authentication. /health stays open so status checks keep working.
+    if (![basePath isEqualToString:@"/health"] && !MCPRequestIsAuthorized(headers)) {
+        [MCPLogger log:@"http_unauthorized req=%@ path=%@", requestLogId, basePath ?: @"<nil>"];
+        [self sendErrorResponse:clientSocket
+                          status:401
+                         message:@"Unauthorized: send 'Authorization: Bearer <token>' (token shown in Settings > iOS MCP)"
+                    requestLogId:requestLogId];
+        free(buffer);
+        return;
+    }
+
     // Route request
     if ([method isEqualToString:@"POST"] && [basePath isEqualToString:@"/mcp"]) {
         NSString *expect = [headers[@"expect"] lowercaseString] ?: @"";
@@ -2042,7 +2078,7 @@ static NSString *MCPLogId(id reqId) {
                     @"httpHeader": @"MCP-Protocol-Version"
                 }
             },
-            @"instructions": @"Use ios-mcp to inspect and operate the connected iPhone.\n\nGetting started: call get_frontmost_app, get_screen_info, get_ui_elements, and screenshot to understand the current device state. get_screen_info includes device_state when SpringBoard exposes it. If locked is true, screen_on is false, the screenshot looks like the Lock Screen, or UI elements are from SpringBoard/Lock Screen, do not continue normal app automation until the device is awake/unlocked.\n\nLock screen handling: a single press_home only wakes or advances the Lock Screen and must not be treated as reaching the Home screen. Use wake_and_home when the device may be locked/off. The equivalent manual sequence is Power then Home when the screen is off, or Home twice when the Lock Screen is already visible. After wake_and_home, verify with screenshot/get_ui_elements/get_frontmost_app before continuing. The server enforces a lock guard: while locked or screen_off, interactive and mutating tools are blocked; only observation and recovery tools are allowed.\n\nTouch and gestures: use screen point coordinates for tap_screen, swipe_screen, long_press, double_tap, and drag_and_drop. There is a single coordinate space: screenshots are returned at point size (one image pixel = one screen point), and get_ui_elements/tap_element/ocr_screen also report points, so coordinates from any of them are passed to the touch tools unchanged — never divide by the Retina scale. drag_and_drop accepts either fromX/fromY/toX/toY for a straight drag, or points for a path where the first point is pressed and the last point is released. For Flutter or custom-rendered apps, accessibility may expose only a container such as FlutterView; use screenshot plus coordinates in that case.\n\nText input: use input_text first for fast bulk text through system keyboard events. If input_text returns isError or reports failure/timeout, immediately retry the same text with type_text; do not repeat input_text. Use type_text for character-by-character input and press_key for special keys (enter, delete, tab, etc.).\n\nHardware buttons: press_home, press_power, press_volume_up, press_volume_down, toggle_mute, wake_and_home.\n\nClipboard: get_clipboard and set_clipboard to read/write clipboard contents.\n\nScreenshot: the screenshot tool returns MCP image content, not text — result.content[0].data contains the base64 JPEG payload and result.content[0].mimeType is image/jpeg. The image is point-sized, so coordinates measured on it are valid tap_screen coordinates directly.\n\nApp management: launch_app, kill_app, list_apps, list_running_apps, get_frontmost_app. launch_app waits until the target app is actually frontmost before returning, so do not immediately re-issue redundant foreground checks unless you need to verify a later transition. To install an IPA, TIPA or DEB from the computer, first upload raw file bytes to POST /upload_file (for example: curl -H 'X-Filename: app.ipa' --data-binary @app.ipa http://device-ip:<server-port>/upload_file or curl -H 'X-Filename: package.deb' --data-binary @package.deb http://device-ip:<server-port>/upload_file). The upload response returns a device path under /var/mobile/Library/Caches/ios-mcp-uploads; pass that path to install_app. To install an IPA, TIPA or DEB already on the phone, call install_app directly with its device path. TIPA files use the same IPA install flow. Unsigned or fakesigned IPAs are supported. DEB installs use dpkg and restart SpringBoard after installation succeeds. To uninstall an app, use list_apps to find the bundle_id, then call uninstall_app. To uninstall a DEB package, call uninstall_app with package_id; DEB removal uses dpkg and restarts SpringBoard after success.\n\nDevice control: get_brightness/set_brightness, get_volume/set_volume, open_url (supports http/https and URL schemes like tel://, prefs:root=WIFI, etc.).\n\nDevice info: get_device_info for model, iOS version, battery, storage, memory, and jailbreak type/package information. Pass debug=true only when diagnosing installation integrity to include bundled helper executable status.\n\nHealth checks: avoid shell brace expansion such as for i in {1..30}; ios-mcp commands often run under /bin/sh where that may execute only once. Use seq or a while loop, and use at least --connect-timeout 3 plus --max-time 5 for /health.\n\nShell: run_command to execute shell commands on the device (timeout default 10s, max 30s).\n\nReverse engineering and debugging: get_app_info returns an installed app's bundle path, data container (sandbox) path, App Group container paths, executable path, version, and entitlements — call it first to locate files. list_dir, read_file, and write_file operate on the device filesystem and fall back to the privileged mcp-root helper for protected paths (other apps' sandboxes, system dirs). read_file returns utf8 for text and base64 for binary; it is capped (default 512KB), so for large or binary files use GET /download_file?path=<device-path> to stream the full file (for example: curl 'http://device-ip:<server-port>/download_file?path=/var/mobile/...' -o out.bin). get_syslog captures the live unified system log across all processes (the stream Console.app shows) for a few seconds — it is a live capture, so trigger the activity you want to observe during the window. get_crash_logs lists crash reports (filter by bundle_id), and read_crash_log returns a single report's full text. write_file is blocked while the device is locked or the screen is off."
+            @"instructions": @"Use ios-mcp to inspect and operate the connected iOS device (iPhone or iPad).\n\nGetting started: call get_frontmost_app, get_screen_info, get_ui_elements, and screenshot to understand the current device state. get_screen_info includes device_state when SpringBoard exposes it. If locked is true, screen_on is false, the screenshot looks like the Lock Screen, or UI elements are from SpringBoard/Lock Screen, do not continue normal app automation until the device is awake/unlocked.\n\nLock screen handling: a single press_home only wakes or advances the Lock Screen and must not be treated as reaching the Home screen. Use wake_and_home when the device may be locked/off. The equivalent manual sequence is Power then Home when the screen is off, or Home twice when the Lock Screen is already visible. After wake_and_home, verify with screenshot/get_ui_elements/get_frontmost_app before continuing. The server enforces a lock guard: while locked or screen_off, interactive and mutating tools are blocked; only observation and recovery tools are allowed.\n\nTouch and gestures: use screen point coordinates for tap_screen, swipe_screen, long_press, double_tap, and drag_and_drop. There is a single coordinate space: screenshots are returned at point size (one image pixel = one screen point), and get_ui_elements/tap_element/ocr_screen also report points, so coordinates from any of them are passed to the touch tools unchanged — never divide by the Retina scale. drag_and_drop accepts either fromX/fromY/toX/toY for a straight drag, or points for a path where the first point is pressed and the last point is released. For Flutter or custom-rendered apps, accessibility may expose only a container such as FlutterView; use screenshot plus coordinates in that case.\n\nText input: use input_text first for fast bulk text through system keyboard events. If input_text returns isError or reports failure/timeout, immediately retry the same text with type_text; do not repeat input_text. Use type_text for character-by-character input and press_key for special keys (enter, delete, tab, etc.).\n\nHardware buttons: press_home, press_power, press_volume_up, press_volume_down, toggle_mute, wake_and_home.\n\nClipboard: get_clipboard and set_clipboard to read/write clipboard contents.\n\nScreenshot: the screenshot tool returns MCP image content, not text — result.content[0].data contains the base64 JPEG payload and result.content[0].mimeType is image/jpeg. The image is point-sized, so coordinates measured on it are valid tap_screen coordinates directly.\n\nApp management: launch_app, kill_app, list_apps, list_running_apps, get_frontmost_app. launch_app waits until the target app is actually frontmost before returning, so do not immediately re-issue redundant foreground checks unless you need to verify a later transition. To install an IPA, TIPA or DEB from the computer, first upload raw file bytes to POST /upload_file (for example: curl -H 'X-Filename: app.ipa' --data-binary @app.ipa http://device-ip:<server-port>/upload_file or curl -H 'X-Filename: package.deb' --data-binary @package.deb http://device-ip:<server-port>/upload_file). The upload response returns a device path under /var/mobile/Library/Caches/ios-mcp-uploads; pass that path to install_app. To install an IPA, TIPA or DEB already on the phone, call install_app directly with its device path. TIPA files use the same IPA install flow. Unsigned or fakesigned IPAs are supported. DEB installs use dpkg and restart SpringBoard after installation succeeds. To uninstall an app, use list_apps to find the bundle_id, then call uninstall_app. To uninstall a DEB package, call uninstall_app with package_id; DEB removal uses dpkg and restarts SpringBoard after success.\n\nDevice control: get_brightness/set_brightness, get_volume/set_volume, open_url (supports http/https and URL schemes like tel://, prefs:root=WIFI, etc.).\n\nDevice info: get_device_info for model, iOS version, battery, storage, memory, and jailbreak type/package information. Pass debug=true only when diagnosing installation integrity to include bundled helper executable status.\n\nHealth checks: avoid shell brace expansion such as for i in {1..30}; ios-mcp commands often run under /bin/sh where that may execute only once. Use seq or a while loop, and use at least --connect-timeout 3 plus --max-time 5 for /health.\n\nShell: run_command to execute shell commands on the device (timeout default 10s, max 30s).\n\nReverse engineering and debugging: get_app_info returns an installed app's bundle path, data container (sandbox) path, App Group container paths, executable path, version, and entitlements — call it first to locate files. list_dir, read_file, and write_file operate on the device filesystem and fall back to the privileged mcp-root helper for protected paths (other apps' sandboxes, system dirs). read_file returns utf8 for text and base64 for binary; it is capped (default 512KB), so for large or binary files use GET /download_file?path=<device-path> to stream the full file (for example: curl 'http://device-ip:<server-port>/download_file?path=/var/mobile/...' -o out.bin). get_syslog captures the live unified system log across all processes (the stream Console.app shows) for a few seconds — it is a live capture, so trigger the activity you want to observe during the window. get_crash_logs lists crash reports (filter by bundle_id), and read_crash_log returns a single report's full text. write_file is blocked while the device is locked or the screen is off."
         }
     };
 }
@@ -2299,7 +2335,7 @@ static NSString *MCPLogId(id reqId) {
             @"inputSchema": @{
                 @"type": @"object",
                 @"properties": @{
-                    @"engine": @{@"type": @"string", @"enum": @[@"vision", @"paddleocr"], @"default": [OCRManager defaultEngine], @"description": @"Current request only. Omitted always means paddleocr; set vision for Apple Vision. Errors never switch engine."},
+                    @"engine": @{@"type": @"string", @"enum": @[@"vision", @"paddleocr"], @"default": [OCRManager defaultEngine], @"description": @"Current request only. Omitted means the default shown here (paddleocr when its worker is installed, otherwise vision). Errors never switch engine."},
                     @"languages": @{@"type": @"array", @"items": @{@"type": @"string"}, @"description": @"Vision defaults to supported Chinese+English on iOS 14+, English on iOS 13. Explicit unsupported languages fail. PaddleOCR uses one Chinese+English model; language hints do not restrict its alphabet."},
                     @"min_confidence": @{@"type": @"number", @"description": @"Drop results below 0..1 (default 0.3). Vision confidence is unchanged; PaddleOCR uses mean CTC probability, not an equivalent calibrated score."},
                     @"region": @{
@@ -2324,7 +2360,7 @@ static NSString *MCPLogId(id reqId) {
                 @"properties": @{
                     @"include_screenshot": @{@"type": @"boolean", @"description": @"Include a base64 JPEG screenshot (default false, saves tokens)."},
                     @"include_ocr": @{@"type": @"boolean", @"description": @"Add an OCR text layer for content not in the accessibility tree (default false)."},
-                    @"engine": @{@"type": @"string", @"enum": @[@"vision", @"paddleocr"], @"default": [OCRManager defaultEngine], @"description": @"OCR engine for this request when include_ocr is true. Omitted always means paddleocr; set vision for Apple Vision. No fallback."},
+                    @"engine": @{@"type": @"string", @"enum": @[@"vision", @"paddleocr"], @"default": [OCRManager defaultEngine], @"description": @"OCR engine for this request when include_ocr is true. Omitted means the default shown here (paddleocr when its worker is installed, otherwise vision). No fallback."},
                     @"clickable_only": @{@"type": @"boolean", @"description": @"Only return clickable elements (default true)."}
                 }
             }
@@ -4632,6 +4668,8 @@ static BOOL MCPSetSystemBrightness(CGFloat brightness) {
     NSString *statusText;
     switch (status) {
         case 400: statusText = @"Bad Request"; break;
+        case 401: statusText = @"Unauthorized"; break;
+        case 403: statusText = @"Forbidden"; break;
         case 411: statusText = @"Length Required"; break;
         case 413: statusText = @"Payload Too Large"; break;
         case 415: statusText = @"Unsupported Media Type"; break;

@@ -34,6 +34,8 @@
 - (UITextField *)textFieldInView:(UIView *)view;
 - (void)updateVisibleFooterText:(NSString *)text forSpecifier:(PSSpecifier *)specifier;
 - (void)setServerControlBusyState:(BOOL)busy;
+- (void)refreshAuthFooter;
+- (void)storeAuthToken:(NSString *)token;
 
 @end
 
@@ -174,6 +176,18 @@ static BOOL IOSMCPEnabledPreference(void) {
 
 - (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {
     NSString *key = [specifier propertyForKey:@"key"];
+    if ([key isEqualToString:IOS_MCP_AUTH_ENABLED_PREFERENCE_KEY]) {
+        BOOL enabled = [value respondsToSelector:@selector(boolValue)] && [value boolValue];
+        // Write the token before the flag so the server never sees "enabled" without a token.
+        if (enabled && IOSMCPStoredAuthToken().length == 0) {
+            [self storeAuthToken:IOSMCPGenerateAuthToken()];
+        }
+        [super setPreferenceValue:value specifier:specifier];
+        CFPreferencesAppSynchronize((__bridge CFStringRef)IOS_MCP_PREFERENCES_DOMAIN);
+        [MCPLogger log:@"prefs_auth enabled=%@", enabled ? @"YES" : @"NO"];
+        [self refreshPromptText];
+        return;
+    }
     if (![key isEqualToString:IOS_MCP_PORT_PREFERENCE_KEY]) {
         [super setPreferenceValue:value specifier:specifier];
         return;
@@ -1178,6 +1192,7 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 }
 
 - (void)refreshPromptText {
+    [self refreshAuthFooter];
     PSSpecifier *promptSpecifier = [self specifierForID:@"codexPromptGroup"];
     if (!promptSpecifier) {
         return;
@@ -1185,6 +1200,62 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 
     [promptSpecifier setProperty:[self codexPrompt] forKey:PSFooterTextGroupKey];
     [self reloadSpecifier:promptSpecifier animated:NO];
+}
+
+- (void)refreshAuthFooter {
+    PSSpecifier *authSpecifier = [self specifierForID:@"authGroup"];
+    if (!authSpecifier) {
+        return;
+    }
+
+    NSString *token = IOSMCPStoredAuthToken();
+    NSString *footer = [NSString stringWithFormat:IOSMCPLocalizedString(@"%@\n\n当前令牌：%@"),
+                        IOSMCPLocalizedString(@"开启后，除 /health 外的所有请求都必须携带 Authorization: Bearer <令牌> 请求头。局域网内的其他设备将无法控制本机。"),
+                        token.length ? token : IOSMCPLocalizedString(@"（未生成）")];
+    [authSpecifier setProperty:footer forKey:PSFooterTextGroupKey];
+    [self reloadSpecifier:authSpecifier animated:NO];
+}
+
+- (void)storeAuthToken:(NSString *)token {
+    CFPreferencesSetAppValue((__bridge CFStringRef)IOS_MCP_AUTH_TOKEN_PREFERENCE_KEY,
+                             (__bridge CFPropertyListRef)token,
+                             (__bridge CFStringRef)IOS_MCP_PREFERENCES_DOMAIN);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)IOS_MCP_PREFERENCES_DOMAIN);
+}
+
+- (void)regenerateAuthToken:(PSSpecifier *)specifier {
+    [self deselectSpecifier:specifier];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:IOSMCPLocalizedString(@"重新生成访问令牌？")
+                                                                  message:IOSMCPLocalizedString(@"已连接的客户端需要更新为新令牌。")
+                                                           preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:IOSMCPLocalizedString(@"取消") style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:IOSMCPLocalizedString(@"重新生成") style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
+        [self storeAuthToken:IOSMCPGenerateAuthToken()];
+        [MCPLogger log:@"prefs_auth token_regenerated"];
+        [self refreshPromptText];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (NSString *)claudeCodeCommand {
+    NSMutableString *command = [NSMutableString stringWithFormat:@"claude mcp add --transport http ios-mcp %@",
+                                IOSMCPServiceURLString()];
+    NSString *token = IOSMCPRequiredAuthToken();
+    if (token.length) {
+        [command appendFormat:@" --header \"Authorization: Bearer %@\"", token];
+    }
+    return command;
+}
+
+- (void)copyClaudeCodeCommand:(PSSpecifier *)specifier {
+    [self deselectSpecifier:specifier];
+    NSString *command = [self claudeCodeCommand];
+    [UIPasteboard generalPasteboard].string = command;
+    [MCPLogger log:@"prefs_copy_claude_command chars=%lu", (unsigned long)command.length];
+    [self showAlertWithTitle:IOSMCPLocalizedString(@"已复制")
+                     message:[NSString stringWithFormat:@"%@\n\n%@",
+                              IOSMCPLocalizedString(@"Claude Code 命令已复制到剪贴板。在电脑终端中运行它即可添加此设备。"),
+                              command]];
 }
 
 - (void)refreshDebugLogFooter {
@@ -1257,10 +1328,16 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 
 - (NSString *)codexPrompt {
     NSString *promptFormat = IOSMCPLocalizedString(@"MCP_PROMPT");
-    return [NSString stringWithFormat:
-            promptFormat,
-            IOSMCPServiceURLString(),
-            IOSMCPHealthURLString()];
+    NSString *prompt = [NSString stringWithFormat:
+                        promptFormat,
+                        IOSMCPServiceURLString(),
+                        IOSMCPHealthURLString()];
+    NSString *token = IOSMCPRequiredAuthToken();
+    if (token.length) {
+        NSString *authNoteFormat = IOSMCPLocalizedString(@"AUTH_PROMPT_NOTE");
+        prompt = [prompt stringByAppendingFormat:authNoteFormat, token, token];
+    }
+    return prompt;
 }
 
 - (void)showAlertWithTitle:(NSString *)title message:(NSString *)message {
