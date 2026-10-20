@@ -43,3 +43,4 @@ __pycache__/
 
 # libzip iOS reconstruite par scripts/build_libzip_ios.sh
 /third_party/libzip-ios/
+/dist/
