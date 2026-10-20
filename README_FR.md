@@ -51,7 +51,12 @@ Il faut [Theos](https://theos.dev) (`~/theos` par défaut) :
 ./build.sh rootless release
 ```
 
-Le `.deb` arrive dans `packages/`. Remarques :
+Le `.deb` arrive dans `packages/`. Un build **release rootless** est ensuite **publié automatiquement**
+par `scripts/publish.sh` : push de `ipad-ios16`, release GitHub `v<version>` (version du fichier `control`)
+avec le `.deb`, et ajout à la source Sileo. Il faut pour ça les notes `docs/ipad-ios16/releases/v<version>.md`
+(1ʳᵉ ligne = titre) ; `IOS_MCP_PUBLISH=0 ./build.sh …` pour ne rien publier.
+
+Remarques :
 
 - `libzip` pour iOS (nécessaire à `mcp-appinst` et `mcp-roothelper`) est compilée automatiquement au premier build par `scripts/build_libzip_ios.sh` (il faut `cmake` et `ninja`).
 - Le build **roothide** nécessite le Theos de roothide (<https://github.com/roothide/theos>).

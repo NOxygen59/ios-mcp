@@ -9,6 +9,8 @@
 # Variables utiles :
 #   THEOS=~/theos                    # emplacement de Theos (défaut : ~/theos)
 #   IOS_MCP_NO_PADDLE=1              # ignore PaddleOCR (l'OCR utilise alors Apple Vision)
+#   IOS_MCP_PUBLISH=0                # ne publie pas (sinon un build release rootless est publié
+#                                    # sur GitHub et Sileo par scripts/publish.sh)
 set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
@@ -24,10 +26,9 @@ if [[ "$ROOT_DIR" == *" "* && -z "${IOS_MCP_BUILD_COPY:-}" ]]; then
   print "Le chemin du projet contient des espaces ; compilation dans ${BUILD_COPY}"
   mkdir -p "$BUILD_COPY"
   rsync -a --delete --exclude .git --exclude packages --exclude .theos "${ROOT_DIR}/" "${BUILD_COPY}/"
-  IOS_MCP_BUILD_COPY=1 zsh "${BUILD_COPY}/build.sh" "$@"
   mkdir -p "${ROOT_DIR}/packages"
-  cp -f "${BUILD_COPY}"/packages/*.deb "${ROOT_DIR}/packages/" 2>/dev/null || true
-  print "Paquets copiés dans ${ROOT_DIR}/packages"
+  IOS_MCP_BUILD_COPY=1 IOS_MCP_SOURCE_DIR="$ROOT_DIR" IOS_MCP_COPY_BACK="${ROOT_DIR}/packages" \
+    zsh "${BUILD_COPY}/build.sh" "$@"
   exit 0
 fi
 
@@ -148,9 +149,19 @@ build_selected_package() {
     exit 1
   fi
 
+  if [[ -n "${IOS_MCP_COPY_BACK:-}" ]]; then
+    cp -f "$deb" "${IOS_MCP_COPY_BACK}/"
+    print "Paquet copié dans ${IOS_MCP_COPY_BACK}"
+  fi
+
   print ""
   print "Construction terminée :"
   print "  ${deb}"
+
+  # Publication automatique (GitHub + Sileo) des builds release rootless, sauf IOS_MCP_PUBLISH=0.
+  if [[ "${IOS_MCP_PUBLISH:-1}" != "0" && "$BUILD_SCHEME_LABEL" == "rootless" && "$BUILD_TYPE_LABEL" == "release" ]]; then
+    zsh "${IOS_MCP_SOURCE_DIR:-$ROOT_DIR}/scripts/publish.sh" "${IOS_MCP_SOURCE_DIR:-$ROOT_DIR}/packages/$(basename "$deb")"
+  fi
 }
 
 if [[ $# -ge 1 ]]; then
